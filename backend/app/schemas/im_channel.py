@@ -164,6 +164,20 @@ class FeishuChannelConfig(BaseModel):
         None, description="Event verification token"
     )
     encrypt_key: Optional[str] = Field(None, description="Event encryption key")
+    # User mapping mode: how to map Feishu users to Wegent users
+    # - "user_id": Use Feishu user_id as username
+    # - "email": Match user by email address
+    # - "select_user": Map all Feishu users to a specific Wegent user
+    user_mapping_mode: UserMappingMode = Field(
+        default="select_user",
+        description="User mapping mode: user_id, email, or select_user",
+    )
+    # User mapping config: additional configuration based on mode
+    # For "select_user" mode: {"target_user_id": 123}
+    user_mapping_config: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="User mapping configuration. For select_user mode: {target_user_id: int}",
+    )
 
 
 class WeChatChannelConfig(BaseModel):

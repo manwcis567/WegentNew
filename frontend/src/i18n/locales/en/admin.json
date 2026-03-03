@@ -745,6 +745,14 @@
       "bot_token": "Bot Token",
       "bot_token_placeholder": "Enter Telegram Bot Token",
       "bot_token_edit_placeholder": "Enter new Bot Token (leave empty to keep existing)",
+      "app_id": "App ID",
+      "app_id_placeholder": "Enter Feishu App ID",
+      "app_secret": "App Secret",
+      "app_secret_placeholder": "Enter Feishu App Secret",
+      "verification_token": "Verification Token",
+      "verification_token_placeholder": "Enter Feishu verification token (optional)",
+      "encrypt_key": "Encryption Key",
+      "encrypt_key_placeholder": "Enter Feishu encryption key (optional)",
       "leave_empty_to_keep": "Leave empty to keep existing",
       "default_team": "Default Agent",
       "default_team_placeholder": "Select default agent",
@@ -759,7 +767,8 @@
       "user_mapping_modes": {
         "select_user": "Specific User",
         "staff_id": "Match by Staff ID",
-        "email": "Match by Email"
+        "email": "Match by Email",
+        "user_id": "Match by User ID"
       },
       "target_user": "Target User",
       "target_user_description": "All IM messages will be processed as this user",
@@ -787,6 +796,7 @@
       "name_required": "Channel name is required",
       "config_required": "Client ID and Client Secret are required",
       "bot_token_required": "Bot Token is required",
+      "app_credentials_required": "App ID and App Secret are required",
       "team_required": "A default agent must be selected",
       "model_required_for_team": "The selected agent has no model configured. You must select a default model.",
       "target_user_required": "A target user must be selected when using Specific User mode"

@@ -745,6 +745,14 @@
       "bot_token": "Bot Token",
       "bot_token_placeholder": "请输入 Telegram Bot Token",
       "bot_token_edit_placeholder": "请输入新的 Bot Token（留空保持不变）",
+      "app_id": "App ID",
+      "app_id_placeholder": "请输入飞书 App ID",
+      "app_secret": "App Secret",
+      "app_secret_placeholder": "请输入飞书 App Secret",
+      "verification_token": "验证 Token",
+      "verification_token_placeholder": "请输入飞书验证 Token（可选）",
+      "encrypt_key": "加密 Key",
+      "encrypt_key_placeholder": "请输入飞书加密 Key（可选）",
       "leave_empty_to_keep": "留空保持不变",
       "default_team": "默认智能体",
       "default_team_placeholder": "选择默认智能体",
@@ -759,7 +767,8 @@
       "user_mapping_modes": {
         "select_user": "指定用户",
         "staff_id": "按工号匹配",
-        "email": "按邮箱匹配"
+        "email": "按邮箱匹配",
+        "user_id": "按用户 ID 匹配"
       },
       "target_user": "目标用户",
       "target_user_description": "所有 IM 消息将以此用户身份处理",
@@ -787,6 +796,7 @@
       "name_required": "渠道名称不能为空",
       "config_required": "Client ID 和 Client Secret 不能为空",
       "bot_token_required": "Bot Token 不能为空",
+      "app_credentials_required": "App ID 和 App Secret 不能为空",
       "team_required": "必须选择一个默认智能体",
       "model_required_for_team": "所选智能体没有配置模型，必须选择一个默认模型",
       "target_user_required": "使用指定用户模式时必须选择一个目标用户"
