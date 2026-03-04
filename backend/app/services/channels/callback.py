@@ -579,4 +579,15 @@ class ChannelCallbackRegistry:
 
 def get_callback_registry() -> ChannelCallbackRegistry:
     """Get the ChannelCallbackRegistry singleton instance."""
-    return ChannelCallbackRegistry.get_instance()
+    registry = ChannelCallbackRegistry.get_instance()
+
+    # Import and register all callback services
+    from app.services.channels.dingtalk.callback import dingtalk_callback_service
+    from app.services.channels.feishu.callback import feishu_callback_service
+    from app.services.channels.telegram.callback import telegram_callback_service
+
+    registry.register(ChannelType.DINGTALK, dingtalk_callback_service)
+    registry.register(ChannelType.FEISHU, feishu_callback_service)
+    registry.register(ChannelType.TELEGRAM, telegram_callback_service)
+
+    return registry
