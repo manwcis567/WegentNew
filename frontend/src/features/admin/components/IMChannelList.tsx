@@ -95,6 +95,8 @@ const IMChannelList: React.FC = () => {
     client_id: string
     client_secret: string
     bot_token: string
+    app_id: string // Feishu specific
+    app_secret: string // Feishu specific
     user_mapping_mode: UserMappingMode
     target_user_id: number
   }>({
@@ -106,6 +108,8 @@ const IMChannelList: React.FC = () => {
     client_id: '',
     client_secret: '',
     bot_token: '',
+    app_id: '',
+    app_secret: '',
     user_mapping_mode: 'select_user',
     target_user_id: 0,
   })
@@ -300,7 +304,12 @@ const IMChannelList: React.FC = () => {
 
       if (formData.channel_type === 'telegram') {
         config.bot_token = formData.bot_token.trim()
+      } else if (formData.channel_type === 'feishu') {
+        // Feishu uses app_id and app_secret
+        config.app_id = formData.app_id.trim()
+        config.app_secret = formData.app_secret.trim()
       } else {
+        // DingTalk and other channels use client_id/client_secret
         config.client_id = formData.client_id.trim()
         config.client_secret = formData.client_secret.trim()
       }
@@ -390,6 +399,13 @@ const IMChannelList: React.FC = () => {
       if (selectedChannel.channel_type === 'telegram') {
         if (formData.bot_token.trim()) {
           newConfig.bot_token = formData.bot_token.trim()
+        }
+      } else if (selectedChannel.channel_type === 'feishu') {
+        if (formData.app_id.trim()) {
+          newConfig.app_id = formData.app_id.trim()
+        }
+        if (formData.app_secret.trim()) {
+          newConfig.app_secret = formData.app_secret.trim()
         }
       } else {
         if (formData.client_id.trim()) {
@@ -488,6 +504,8 @@ const IMChannelList: React.FC = () => {
       client_id: '',
       client_secret: '',
       bot_token: '',
+      app_id: '',
+      app_secret: '',
       user_mapping_mode: 'select_user',
       target_user_id: 0,
     })
@@ -503,15 +521,34 @@ const IMChannelList: React.FC = () => {
       | undefined
     const targetUserId = userMappingConfig?.target_user_id || 0
 
+    // Extract channel-specific credentials
+    let client_id = ''
+    let client_secret = ''
+    let bot_token = ''
+    let app_id = ''
+    let app_secret = ''
+
+    if (channel.channel_type === 'telegram') {
+      bot_token = (channel.config?.bot_token as string) || ''
+    } else if (channel.channel_type === 'feishu') {
+      app_id = (channel.config?.app_id as string) || ''
+      app_secret = (channel.config?.app_secret as string) || ''
+    } else {
+      client_id = (channel.config?.client_id as string) || ''
+      client_secret = (channel.config?.client_secret as string) || ''
+    }
+
     setFormData({
       name: channel.name,
       channel_type: channel.channel_type,
       is_enabled: channel.is_enabled,
       default_team_id: channel.default_team_id || 0,
       default_model_name: channel.default_model_name || '',
-      client_id: (channel.config?.client_id as string) || '',
-      client_secret: '', // Don't show existing secret
-      bot_token: '', // Don't show existing bot_token
+      client_id,
+      client_secret,
+      bot_token,
+      app_id,
+      app_secret,
       user_mapping_mode: userMappingMode,
       target_user_id: targetUserId,
     })
@@ -718,15 +755,12 @@ const IMChannelList: React.FC = () => {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="dingtalk">{t('admin:im_channels.types.dingtalk')}</SelectItem>
+                  <SelectItem value="feishu">{t('admin:im_channels.types.feishu')}</SelectItem>
                   <SelectItem value="telegram">{t('admin:im_channels.types.telegram')}</SelectItem>
-                  <SelectItem value="feishu" disabled>
-                    {t('admin:im_channels.types.feishu')} (
-                    {t('admin:im_channels.types.not_supported')})
-                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            {/* Telegram uses bot_token, other channels use client_id/client_secret */}
+            {/* Telegram uses bot_token, DingTalk uses client_id/client_secret, Feishu uses app_id/app_secret */}
             {formData.channel_type === 'telegram' ? (
               <div className="space-y-2">
                 <Label htmlFor="bot_token">{t('admin:im_channels.form.bot_token')} *</Label>
@@ -736,6 +770,24 @@ const IMChannelList: React.FC = () => {
                   value={formData.bot_token}
                   onChange={e => setFormData({ ...formData, bot_token: e.target.value })}
                   placeholder={t('admin:im_channels.form.bot_token_placeholder')}
+                />
+              </div>
+            ) : formData.channel_type === 'feishu' ? (
+              <div className="space-y-2">
+                <Label htmlFor="app_id">{t('admin:im_channels.form.app_id')} *</Label>
+                <Input
+                  id="app_id"
+                  value={formData.app_id}
+                  onChange={e => setFormData({ ...formData, app_id: e.target.value })}
+                  placeholder={t('admin:im_channels.form.app_id_placeholder')}
+                />
+                <Label htmlFor="app_secret">{t('admin:im_channels.form.app_secret')} *</Label>
+                <Input
+                  id="app_secret"
+                  type="password"
+                  value={formData.app_secret}
+                  onChange={e => setFormData({ ...formData, app_secret: e.target.value })}
+                  placeholder={t('admin:im_channels.form.app_secret_placeholder')}
                 />
               </div>
             ) : (
@@ -924,7 +976,7 @@ const IMChannelList: React.FC = () => {
                 className="bg-muted"
               />
             </div>
-            {/* Telegram uses bot_token, other channels use client_id/client_secret */}
+            {/* Telegram uses bot_token, DingTalk uses client_id/client_secret, Feishu uses app_id/app_secret */}
             {formData.channel_type === 'telegram' ? (
               <div className="space-y-2">
                 <Label htmlFor="edit-bot_token">
@@ -939,6 +991,34 @@ const IMChannelList: React.FC = () => {
                   value={formData.bot_token}
                   onChange={e => setFormData({ ...formData, bot_token: e.target.value })}
                   placeholder={t('admin:im_channels.form.bot_token_edit_placeholder')}
+                />
+              </div>
+            ) : formData.channel_type === 'feishu' ? (
+              <div className="space-y-2">
+                <Label htmlFor="edit-app_id">
+                  {t('admin:im_channels.form.app_id')}
+                  <span className="text-xs text-text-muted ml-2">
+                    ({t('admin:im_channels.form.leave_empty_to_keep')})
+                  </span>
+                </Label>
+                <Input
+                  id="edit-app_id"
+                  value={formData.app_id}
+                  onChange={e => setFormData({ ...formData, app_id: e.target.value })}
+                  placeholder={t('admin:im_channels.form.app_id_placeholder')}
+                />
+                <Label htmlFor="edit-app_secret">
+                  {t('admin:im_channels.form.app_secret')}
+                  <span className="text-xs text-text-muted ml-2">
+                    ({t('admin:im_channels.form.leave_empty_to_keep')})
+                  </span>
+                </Label>
+                <Input
+                  id="edit-app_secret"
+                  type="password"
+                  value={formData.app_secret}
+                  onChange={e => setFormData({ ...formData, app_secret: e.target.value })}
+                  placeholder={t('admin:im_channels.form.app_secret_placeholder')}
                 />
               </div>
             ) : (
