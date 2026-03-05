@@ -719,9 +719,8 @@ const IMChannelList: React.FC = () => {
                 <SelectContent>
                   <SelectItem value="dingtalk">{t('admin:im_channels.types.dingtalk')}</SelectItem>
                   <SelectItem value="telegram">{t('admin:im_channels.types.telegram')}</SelectItem>
-                  <SelectItem value="feishu" disabled>
-                    {t('admin:im_channels.types.feishu')} (
-                    {t('admin:im_channels.types.not_supported')})
+                  <SelectItem value="feishu">
+                    {t('admin:im_channels.types.feishu')}
                   </SelectItem>
                 </SelectContent>
               </Select>
