@@ -40,6 +40,9 @@ logger = logging.getLogger(__name__)
 # Message deduplication settings
 FEISHU_MSG_DEDUP_PREFIX = "feishu:msg_dedup:"
 FEISHU_MSG_DEDUP_TTL = 300  # 5 minutes
+FEISHU_LEGACY_CARD_CALLBACK_EVENT = "card.action.trigger"
+FEISHU_BOT_MENU_CALLBACK_EVENT = "application.bot.menu_v6"
+FEISHU_BOT_P2P_ENTER_EVENT = "im.chat.access_event.bot_p2p_chat_entered_v1"
 
 
 class FeishuChannelHandler(BaseChannelHandler):
@@ -203,7 +206,10 @@ class FeishuChannelHandler(BaseChannelHandler):
                 for paragraph in content_list:
                     if isinstance(paragraph, list):
                         for element in paragraph:
-                            if isinstance(element, dict) and element.get("tag") == "text":
+                            if (
+                                isinstance(element, dict)
+                                and element.get("tag") == "text"
+                            ):
                                 texts.append(element.get("text", ""))
         return " ".join(texts) if texts else ""
 
@@ -363,3 +369,205 @@ class FeishuChannelHandler(BaseChannelHandler):
             db.close()
 
         return await self.handle_message(event_data)
+
+    async def handle_callback_event(self, event_type: str, event_data: dict) -> bool:
+        """Handle a Feishu callback payload that is not a plain message event."""
+        self.logger.info(
+            "[FeishuHandler] Received callback event: type=%s, keys=%s",
+            event_type,
+            sorted(event_data.keys()),
+        )
+
+        if event_type == FEISHU_BOT_P2P_ENTER_EVENT:
+            return await self._handle_p2p_enter_callback(event_data)
+
+        synthetic_event = self._build_synthetic_message_event(event_type, event_data)
+        if synthetic_event is None:
+            self.logger.info(
+                "[FeishuHandler] Callback event %s received but not actionable",
+                event_type,
+            )
+            return True
+
+        return await self.handle_feishu_event(synthetic_event)
+
+    async def _handle_p2p_enter_callback(self, event_data: dict) -> bool:
+        """Handle the callback fired when a user enters the bot's P2P chat."""
+        open_id = self._extract_nested(
+            event_data,
+            ("operator", "operator_id", "open_id"),
+            ("operator_id", "open_id"),
+            ("sender", "sender_id", "open_id"),
+        )
+        chat_id = self._extract_nested(
+            event_data,
+            ("chat", "chat_id"),
+            ("chat_id",),
+        )
+
+        if not open_id or not chat_id:
+            self.logger.warning(
+                "[FeishuHandler] Ignoring p2p-enter callback without open_id/chat_id"
+            )
+            return True
+
+        synthetic_event = self._create_synthetic_text_event(
+            content="/help",
+            open_id=open_id,
+            conversation_id=chat_id,
+            message_id=f"callback:p2p_enter:{chat_id}",
+            raw_data=event_data,
+        )
+        return await self.handle_feishu_event(synthetic_event)
+
+    def _build_synthetic_message_event(
+        self, event_type: str, event_data: dict
+    ) -> Optional[dict]:
+        """Build a synthetic message event from a callback payload when possible."""
+        if event_type == FEISHU_LEGACY_CARD_CALLBACK_EVENT:
+            content = self._extract_card_callback_content(event_data)
+        elif event_type == FEISHU_BOT_MENU_CALLBACK_EVENT:
+            content = self._extract_bot_menu_content(event_data)
+        else:
+            return None
+
+        if not content:
+            return None
+
+        open_id = self._extract_nested(
+            event_data,
+            ("operator", "open_id"),
+            ("operator", "operator_id", "open_id"),
+            ("operator_id", "open_id"),
+            ("user", "open_id"),
+        )
+        message_id = self._extract_nested(
+            event_data,
+            ("open_message_id",),
+            ("message", "message_id"),
+        )
+        chat_id = self._extract_nested(
+            event_data,
+            ("chat_id",),
+            ("chat", "chat_id"),
+            ("message", "chat_id"),
+        )
+
+        conversation_id = chat_id or message_id
+        if not open_id or not conversation_id:
+            self.logger.warning(
+                "[FeishuHandler] Callback %s missing open_id or conversation_id",
+                event_type,
+            )
+            return None
+
+        synthetic_message_id = message_id or f"callback:{event_type}:{conversation_id}"
+        return self._create_synthetic_text_event(
+            content=content,
+            open_id=open_id,
+            conversation_id=conversation_id,
+            message_id=synthetic_message_id,
+            raw_data=event_data,
+        )
+
+    def _create_synthetic_text_event(
+        self,
+        content: str,
+        open_id: str,
+        conversation_id: str,
+        message_id: str,
+        raw_data: dict,
+    ) -> dict:
+        """Create a message-like event so callbacks can reuse the normal pipeline."""
+        return {
+            "sender": {
+                "sender_id": {
+                    "open_id": open_id,
+                    "user_id": "",
+                    "union_id": "",
+                },
+                "sender_type": "user",
+                "tenant_key": "",
+            },
+            "message": {
+                "message_id": message_id,
+                "root_id": "",
+                "parent_id": "",
+                "create_time": "",
+                "chat_id": conversation_id,
+                "chat_type": "p2p",
+                "message_type": "text",
+                "content": json.dumps({"text": content}, ensure_ascii=False),
+                "mentions": [],
+            },
+            "_callback_event": raw_data,
+        }
+
+    def _extract_card_callback_content(self, event_data: dict) -> Optional[str]:
+        """Extract a command or text payload from a card action callback."""
+        action = event_data.get("action", {})
+        for key in ("value", "form_value", "option"):
+            content = self._extract_action_content(action.get(key))
+            if content:
+                return content
+        return self._extract_action_content(event_data.get("action_value"))
+
+    def _extract_bot_menu_content(self, event_data: dict) -> Optional[str]:
+        """Map bot menu callback keys onto existing slash commands when possible."""
+        event_key = self._extract_nested(
+            event_data,
+            ("event_key",),
+            ("event", "event_key"),
+        )
+        if not event_key or not isinstance(event_key, str):
+            return None
+
+        normalized = event_key.strip().lower()
+        known_commands = {"new", "help", "devices", "status"}
+        if normalized in known_commands:
+            return f"/{normalized}"
+
+        if normalized.startswith("/"):
+            return normalized
+
+        return normalized
+
+    def _extract_action_content(self, payload: Any) -> Optional[str]:
+        """Extract the first useful command-like string from callback payloads."""
+        if isinstance(payload, str):
+            stripped = payload.strip()
+            return stripped or None
+
+        if isinstance(payload, list):
+            for item in payload:
+                content = self._extract_action_content(item)
+                if content:
+                    return content
+            return None
+
+        if not isinstance(payload, dict):
+            return None
+
+        for key in ("command", "text", "value", "key"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+        for value in payload.values():
+            content = self._extract_action_content(value)
+            if content:
+                return content
+        return None
+
+    def _extract_nested(self, data: dict, *paths: tuple[str, ...]) -> Optional[str]:
+        """Return the first non-empty string found at the provided paths."""
+        for path in paths:
+            current: Any = data
+            for key in path:
+                if not isinstance(current, dict):
+                    current = None
+                    break
+                current = current.get(key)
+            if isinstance(current, str) and current.strip():
+                return current.strip()
+        return None

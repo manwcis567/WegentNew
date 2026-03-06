@@ -15,9 +15,11 @@ IM channels are stored as Messager CRD in the kinds table.
 """
 
 import asyncio
+import json
 import logging
 import threading
-from typing import Any, Dict, Optional
+from dataclasses import is_dataclass
+from typing import Any, Callable, Dict, Optional
 
 from app.services.channels.base import BaseChannelProvider
 
@@ -26,6 +28,18 @@ logger = logging.getLogger(__name__)
 # CRD kind for IM channels
 MESSAGER_KIND = "Messager"
 MESSAGER_USER_ID = 0
+
+FEISHU_MESSAGE_EVENT = "im.message.receive_v1"
+FEISHU_LEGACY_CARD_CALLBACK_EVENT = "card.action.trigger"
+FEISHU_CALLBACK_REGISTRATIONS: tuple[tuple[str, str], ...] = (
+    (FEISHU_MESSAGE_EVENT, "register_p2_im_message_receive_v1"),
+    (FEISHU_LEGACY_CARD_CALLBACK_EVENT, "register_p2_card_action_trigger"),
+    ("application.bot.menu_v6", "register_p2_application_bot_menu_v6"),
+    (
+        "im.chat.access_event.bot_p2p_chat_entered_v1",
+        "register_p2_im_chat_access_event_bot_p2p_chat_entered_v1",
+    ),
+)
 
 
 def _get_channel_default_team_id(channel_id: int) -> Optional[int]:
@@ -156,13 +170,23 @@ class FeishuChannelProvider(BaseChannelProvider):
 
     @property
     def app_id(self) -> Optional[str]:
-        """Get the Feishu app ID from config (stored as client_id)."""
-        return self.config.get("client_id")
+        """Get the Feishu app ID from config."""
+        return self.config.get("app_id") or self.config.get("client_id")
 
     @property
     def app_secret(self) -> Optional[str]:
-        """Get the Feishu app secret from config (stored as client_secret)."""
-        return self.config.get("client_secret")
+        """Get the Feishu app secret from config."""
+        return self.config.get("app_secret") or self.config.get("client_secret")
+
+    @property
+    def verification_token(self) -> Optional[str]:
+        """Get the optional verification token for HTTP callback mode."""
+        return self.config.get("verification_token") or self.config.get("token")
+
+    @property
+    def encrypt_key(self) -> Optional[str]:
+        """Get the optional encrypt key for HTTP callback mode."""
+        return self.config.get("encrypt_key")
 
     def _is_configured(self) -> bool:
         """Check if Feishu is properly configured."""
@@ -249,15 +273,32 @@ class FeishuChannelProvider(BaseChannelProvider):
                     future.result(timeout=120)
 
                 except Exception as e:
-                    logger.exception(
-                        "[Feishu] Error handling message event: %s", e
-                    )
+                    logger.exception("[Feishu] Error handling message event: %s", e)
 
-            event_handler = lark.EventDispatcherHandler.builder(
+            dispatcher_builder = lark.EventDispatcherHandler.builder(
                 "", ""  # Empty verification token and encrypt key for ws mode
-            ).register_p2_im_message_receive_v1(
-                _handle_message_receive
-            ).build()
+            )
+
+            for event_name, register_method_name in FEISHU_CALLBACK_REGISTRATIONS:
+                register_method = getattr(
+                    dispatcher_builder, register_method_name, None
+                )
+                if register_method is None:
+                    logger.info(
+                        "[Feishu] SDK does not expose %s for %s, skipping",
+                        register_method_name,
+                        event_name,
+                    )
+                    continue
+
+                register_method(
+                    self._create_event_callback(
+                        event_name=event_name,
+                        message_handler=_handle_message_receive,
+                    )
+                )
+
+            event_handler = dispatcher_builder.build()
 
             # Create WebSocket client
             self._ws_client = lark.ws.Client(
@@ -392,72 +433,104 @@ class FeishuChannelProvider(BaseChannelProvider):
         status["extra_info"] = {
             "app_id": f"{self.app_id[:8]}..." if self.app_id else None,
             "default_team_id": self.default_team_id,
+            "supports_long_connection_callbacks": [
+                event_name
+                for event_name, register_method_name in FEISHU_CALLBACK_REGISTRATIONS
+                if register_method_name != "register_p2_im_message_receive_v1"
+            ],
+            "legacy_callback_path": f"/api/channels/feishu/callbacks/{self.channel_id}",
         }
         return status
 
+    def _create_event_callback(
+        self,
+        event_name: str,
+        message_handler: Callable[[Any], None],
+    ) -> Callable[[Any], None]:
+        """Create a sync SDK callback that dispatches to the async handler."""
 
-def _extract_event_data(event: Any) -> dict:
-    """Extract event data from lark SDK event object into a plain dict.
+        def _callback(data: Any) -> None:
+            try:
+                event_data = _extract_event_payload(data)
+                if not event_data:
+                    logger.warning("[Feishu] Empty payload received for %s", event_name)
+                    return
 
-    The SDK event object has attributes like sender, message, etc.
-    We convert to a dict structure for our handler.
+                if event_name == FEISHU_MESSAGE_EVENT:
+                    message_handler(event_data)
+                    return
 
-    Args:
-        event: lark SDK event object
+                loop = _get_or_create_event_loop()
+                future = asyncio.run_coroutine_threadsafe(
+                    self._handler.handle_callback_event(event_name, event_data),
+                    loop,
+                )
+                future.result(timeout=120)
+            except Exception as e:
+                logger.exception(
+                    "[Feishu] Error handling %s callback: %s", event_name, e
+                )
 
-    Returns:
-        Dict with sender and message information
-    """
-    result = {}
+        return _callback
+
+
+def _extract_event_payload(data: Any) -> dict:
+    """Extract a plain dict payload from lark SDK callback/event objects."""
+    try:
+        if isinstance(data, dict):
+            if isinstance(data.get("event"), dict):
+                return data["event"]
+            return data
+
+        event = getattr(data, "event", None)
+        if event is not None:
+            return _to_plain_data(event)
+
+        return _to_plain_data(data)
+    except Exception as e:
+        logger.exception("[Feishu] Error extracting event payload: %s", e)
+        return {}
+
+
+def _to_plain_data(value: Any) -> Any:
+    """Convert SDK objects into plain Python data structures."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {key: _to_plain_data(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_to_plain_data(item) for item in value]
+    if is_dataclass(value):
+        return {
+            key: _to_plain_data(item)
+            for key, item in value.__dict__.items()
+            if not key.startswith("_")
+        }
+
+    if hasattr(value, "to_dict"):
+        maybe_dict = value.to_dict()
+        if isinstance(maybe_dict, dict):
+            return _to_plain_data(maybe_dict)
+
+    if hasattr(value, "__dict__"):
+        data = {}
+        for key, item in vars(value).items():
+            if key.startswith("_") or callable(item):
+                continue
+            data[key] = _to_plain_data(item)
+        if data:
+            return data
+
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="ignore")
+
+    if hasattr(value, "__iter__") and not isinstance(value, (str, bytes)):
+        return [_to_plain_data(item) for item in value]
 
     try:
-        # Extract sender
-        sender = getattr(event, "sender", None)
-        if sender:
-            sender_id = getattr(sender, "sender_id", None)
-            result["sender"] = {
-                "sender_id": {
-                    "open_id": getattr(sender_id, "open_id", "") if sender_id else "",
-                    "user_id": getattr(sender_id, "user_id", "") if sender_id else "",
-                    "union_id": getattr(sender_id, "union_id", "") if sender_id else "",
-                },
-                "sender_type": getattr(sender, "sender_type", ""),
-                "tenant_key": getattr(sender, "tenant_key", ""),
-            }
-
-        # Extract message
-        message = getattr(event, "message", None)
-        if message:
-            # Extract mentions
-            mentions = []
-            raw_mentions = getattr(message, "mentions", None)
-            if raw_mentions:
-                for m in raw_mentions:
-                    mention_id = getattr(m, "id", None)
-                    mentions.append({
-                        "key": getattr(m, "key", ""),
-                        "id": {
-                            "open_id": getattr(mention_id, "open_id", "") if mention_id else "",
-                        },
-                        "name": getattr(m, "name", ""),
-                    })
-
-            result["message"] = {
-                "message_id": getattr(message, "message_id", ""),
-                "root_id": getattr(message, "root_id", ""),
-                "parent_id": getattr(message, "parent_id", ""),
-                "create_time": getattr(message, "create_time", ""),
-                "chat_id": getattr(message, "chat_id", ""),
-                "chat_type": getattr(message, "chat_type", ""),
-                "message_type": getattr(message, "message_type", ""),
-                "content": getattr(message, "content", ""),
-                "mentions": mentions,
-            }
-
-    except Exception as e:
-        logger.exception("[Feishu] Error extracting event data: %s", e)
-
-    return result
+        return json.loads(str(value))
+    except Exception:
+        return str(value)
 
 
 def _get_or_create_event_loop() -> asyncio.AbstractEventLoop:

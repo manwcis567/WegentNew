@@ -94,6 +94,8 @@ const IMChannelList: React.FC = () => {
     default_model_name: string
     client_id: string
     client_secret: string
+    verification_token: string
+    encrypt_key: string
     bot_token: string
     user_mapping_mode: UserMappingMode
     target_user_id: number
@@ -105,6 +107,8 @@ const IMChannelList: React.FC = () => {
     default_model_name: '',
     client_id: '',
     client_secret: '',
+    verification_token: '',
+    encrypt_key: '',
     bot_token: '',
     user_mapping_mode: 'select_user',
     target_user_id: 0,
@@ -303,6 +307,14 @@ const IMChannelList: React.FC = () => {
       } else {
         config.client_id = formData.client_id.trim()
         config.client_secret = formData.client_secret.trim()
+        if (formData.channel_type === 'feishu') {
+          if (formData.verification_token.trim()) {
+            config.verification_token = formData.verification_token.trim()
+          }
+          if (formData.encrypt_key.trim()) {
+            config.encrypt_key = formData.encrypt_key.trim()
+          }
+        }
       }
 
       // Add user_mapping_config if select_user mode
@@ -398,6 +410,14 @@ const IMChannelList: React.FC = () => {
         if (formData.client_secret.trim()) {
           newConfig.client_secret = formData.client_secret.trim()
         }
+        if (selectedChannel.channel_type === 'feishu') {
+          if (formData.verification_token.trim()) {
+            newConfig.verification_token = formData.verification_token.trim()
+          }
+          if (formData.encrypt_key.trim()) {
+            newConfig.encrypt_key = formData.encrypt_key.trim()
+          }
+        }
       }
 
       // Add user_mapping_config if select_user mode
@@ -487,6 +507,8 @@ const IMChannelList: React.FC = () => {
       default_model_name: '',
       client_id: '',
       client_secret: '',
+      verification_token: '',
+      encrypt_key: '',
       bot_token: '',
       user_mapping_mode: 'select_user',
       target_user_id: 0,
@@ -511,6 +533,8 @@ const IMChannelList: React.FC = () => {
       default_model_name: channel.default_model_name || '',
       client_id: (channel.config?.client_id as string) || '',
       client_secret: '', // Don't show existing secret
+      verification_token: '',
+      encrypt_key: '',
       bot_token: '', // Don't show existing bot_token
       user_mapping_mode: userMappingMode,
       target_user_id: targetUserId,
@@ -719,9 +743,7 @@ const IMChannelList: React.FC = () => {
                 <SelectContent>
                   <SelectItem value="dingtalk">{t('admin:im_channels.types.dingtalk')}</SelectItem>
                   <SelectItem value="telegram">{t('admin:im_channels.types.telegram')}</SelectItem>
-                  <SelectItem value="feishu">
-                    {t('admin:im_channels.types.feishu')}
-                  </SelectItem>
+                  <SelectItem value="feishu">{t('admin:im_channels.types.feishu')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -760,6 +782,33 @@ const IMChannelList: React.FC = () => {
                     placeholder={t('admin:im_channels.form.client_secret_placeholder')}
                   />
                 </div>
+                {formData.channel_type === 'feishu' && (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="verification_token">
+                        {t('admin:im_channels.form.verification_token')}
+                      </Label>
+                      <Input
+                        id="verification_token"
+                        value={formData.verification_token}
+                        onChange={e =>
+                          setFormData({ ...formData, verification_token: e.target.value })
+                        }
+                        placeholder={t('admin:im_channels.form.verification_token_placeholder')}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="encrypt_key">{t('admin:im_channels.form.encrypt_key')}</Label>
+                      <Input
+                        id="encrypt_key"
+                        type="password"
+                        value={formData.encrypt_key}
+                        onChange={e => setFormData({ ...formData, encrypt_key: e.target.value })}
+                        placeholder={t('admin:im_channels.form.encrypt_key_placeholder')}
+                      />
+                    </div>
+                  </>
+                )}
               </>
             )}
             <div className="space-y-2">
@@ -966,6 +1015,43 @@ const IMChannelList: React.FC = () => {
                     placeholder={t('admin:im_channels.form.client_secret_edit_placeholder')}
                   />
                 </div>
+                {formData.channel_type === 'feishu' && (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-verification_token">
+                        {t('admin:im_channels.form.verification_token')}
+                        <span className="text-xs text-text-muted ml-2">
+                          ({t('admin:im_channels.form.leave_empty_to_keep')})
+                        </span>
+                      </Label>
+                      <Input
+                        id="edit-verification_token"
+                        value={formData.verification_token}
+                        onChange={e =>
+                          setFormData({ ...formData, verification_token: e.target.value })
+                        }
+                        placeholder={t(
+                          'admin:im_channels.form.verification_token_edit_placeholder'
+                        )}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-encrypt_key">
+                        {t('admin:im_channels.form.encrypt_key')}
+                        <span className="text-xs text-text-muted ml-2">
+                          ({t('admin:im_channels.form.leave_empty_to_keep')})
+                        </span>
+                      </Label>
+                      <Input
+                        id="edit-encrypt_key"
+                        type="password"
+                        value={formData.encrypt_key}
+                        onChange={e => setFormData({ ...formData, encrypt_key: e.target.value })}
+                        placeholder={t('admin:im_channels.form.encrypt_key_edit_placeholder')}
+                      />
+                    </div>
+                  </>
+                )}
               </>
             )}
             <div className="space-y-2">
