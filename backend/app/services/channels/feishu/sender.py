@@ -156,9 +156,7 @@ class FeishuRobotSender:
 
                 if data.get("code") != 0:
                     error_msg = data.get("msg", "Unknown error")
-                    logger.error(
-                        f"[FeishuSender] Reply failed: {error_msg}"
-                    )
+                    logger.error(f"[FeishuSender] Reply failed: {error_msg}")
                     return {"success": False, "error": error_msg}
 
                 logger.info(
@@ -218,9 +216,7 @@ class FeishuRobotSender:
 
                 if data.get("code") != 0:
                     error_msg = data.get("msg", "Unknown error")
-                    logger.error(
-                        f"[FeishuSender] Send failed: {error_msg}"
-                    )
+                    logger.error(f"[FeishuSender] Send failed: {error_msg}")
                     return {"success": False, "error": error_msg}
 
                 logger.info(
