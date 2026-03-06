@@ -496,18 +496,14 @@ class WegentChatbotHandler(dingtalk_stream.ChatbotHandler):
                     mime_type = "image/png"
 
                 base64_data = base64.b64encode(response.content).decode("utf-8")
-                images.append(
-                    {"mime_type": mime_type, "base64_data": base64_data}
-                )
+                images.append({"mime_type": mime_type, "base64_data": base64_data})
                 self.logger.info(
                     "[DingTalkHandler] Downloaded image: mime=%s, size=%d bytes",
                     mime_type,
                     len(response.content),
                 )
             except Exception as e:
-                self.logger.error(
-                    "[DingTalkHandler] Failed to download image: %s", e
-                )
+                self.logger.error("[DingTalkHandler] Failed to download image: %s", e)
                 continue
         return images
 

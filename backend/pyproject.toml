@@ -105,6 +105,8 @@ dependencies = [
     "python-socketio>=5.10.0",
     # DingTalk Stream SDK for IM channel integration
     "dingtalk-stream>=0.24.0",
+    # Feishu (Lark) SDK for IM channel integration
+    "lark-oapi>=1.3.0",
     # Telegram Bot SDK for IM channel integration
     "python-telegram-bot>=21.0",
     # RAG (Retrieval-Augmented Generation) dependencies
