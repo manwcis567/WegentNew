@@ -105,6 +105,7 @@ class FeishuChannelProvider(BaseChannelProvider):
         self.sender: Optional[FeishuBotSender] = None
         self._client: Optional["FeishuWsClient"] = None
         self._task: Optional[asyncio.Task] = None
+        self._event_loop: Optional[asyncio.AbstractEventLoop] = None
 
     @property
     def app_id(self) -> Optional[str]:
@@ -208,15 +209,28 @@ class FeishuChannelProvider(BaseChannelProvider):
         builder = EventDispatcherHandler.builder("", "")
 
         def _sync_handler(event: Any) -> None:
-            if not self._task:
+            if not self._event_loop:
+                logger.warning(
+                    "[Feishu] Event loop unavailable, dropping event for channel_id=%d",
+                    self.channel_id,
+                )
                 return
 
-            loop = self._task.get_loop()
             future = asyncio.run_coroutine_threadsafe(
                 self._handle_long_connection_event(event),
-                loop,
+                self._event_loop,
             )
-            future.result(timeout=10)
+
+            def _log_async_error(done_future: Any) -> None:
+                try:
+                    done_future.result()
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.exception(
+                        "[Feishu] Failed to process long-connection event: %s",
+                        exc,
+                    )
+
+            future.add_done_callback(_log_async_error)
 
         return builder.register_p2_im_message_receive_v1(_sync_handler).build()
 
@@ -241,6 +255,7 @@ class FeishuChannelProvider(BaseChannelProvider):
                     channel_id
                 ),
             )
+            self._event_loop = asyncio.get_running_loop()
             self._client = FeishuWsClient(
                 app_id=self.app_id,
                 app_secret=self.app_secret,
@@ -280,6 +295,7 @@ class FeishuChannelProvider(BaseChannelProvider):
 
         self._task = None
         self._client = None
+        self._event_loop = None
         self._handler = None
         self.sender = None
         self._set_running(False)
