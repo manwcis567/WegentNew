@@ -157,7 +157,7 @@ class FeishuChannelProvider(BaseChannelProvider):
             exists = await cache_manager.get(dedup_key)
             if exists:
                 return
-            await cache_manager.set(dedup_key, "1", ex=FEISHU_MSG_DEDUP_TTL)
+            await cache_manager.set(dedup_key, "1", expire=FEISHU_MSG_DEDUP_TTL)
 
         event_data = getattr(event, "event", None)
         message = getattr(event_data, "message", None)

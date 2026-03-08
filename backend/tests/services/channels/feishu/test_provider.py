@@ -120,7 +120,7 @@ async def test_handle_long_connection_event_dedup(monkeypatch):
     async def _mock_get(_key):
         return "1"
 
-    async def _mock_set(_key, _value, ex=None):
+    async def _mock_set(_key, _value, expire=None):
         return True
 
     monkeypatch.setattr(
