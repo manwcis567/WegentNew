@@ -209,28 +209,36 @@ class FeishuChannelProvider(BaseChannelProvider):
         builder = EventDispatcherHandler.builder("", "")
 
         def _sync_handler(event: Any) -> None:
-            if not self._event_loop:
-                logger.warning(
-                    "[Feishu] Event loop unavailable, dropping event for channel_id=%d",
-                    self.channel_id,
+            loop = self._event_loop
+            if loop and not loop.is_closed():
+                future = asyncio.run_coroutine_threadsafe(
+                    self._handle_long_connection_event(event),
+                    loop,
                 )
+
+                def _log_async_error(done_future: Any) -> None:
+                    try:
+                        done_future.result()
+                    except Exception as exc:  # pragma: no cover - defensive logging
+                        logger.exception(
+                            "[Feishu] Failed to process long-connection event: %s",
+                            exc,
+                        )
+
+                future.add_done_callback(_log_async_error)
                 return
 
-            future = asyncio.run_coroutine_threadsafe(
-                self._handle_long_connection_event(event),
-                self._event_loop,
+            logger.warning(
+                "[Feishu] Event loop unavailable, fallback to synchronous processing for channel_id=%d",
+                self.channel_id,
             )
-
-            def _log_async_error(done_future: Any) -> None:
-                try:
-                    done_future.result()
-                except Exception as exc:  # pragma: no cover - defensive logging
-                    logger.exception(
-                        "[Feishu] Failed to process long-connection event: %s",
-                        exc,
-                    )
-
-            future.add_done_callback(_log_async_error)
+            try:
+                asyncio.run(self._handle_long_connection_event(event))
+            except Exception as exc:
+                logger.exception(
+                    "[Feishu] Failed to process event in synchronous fallback: %s",
+                    exc,
+                )
 
         return builder.register_p2_im_message_receive_v1(_sync_handler).build()
 
