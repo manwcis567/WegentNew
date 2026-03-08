@@ -9,6 +9,7 @@ from app.api.endpoints import (
     auth,
     deep_research,
     devices,
+    feishu_callbacks,
     groups,
     health,
     knowledge,
@@ -70,6 +71,7 @@ from app.api.router import api_router
 
 # Health check endpoints (no prefix, directly under /api)
 api_router.include_router(health.router, tags=["health"])
+api_router.include_router(feishu_callbacks.router, tags=["feishu-callbacks"])
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(oidc.router, prefix="/auth/oidc", tags=["auth", "oidc"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])
