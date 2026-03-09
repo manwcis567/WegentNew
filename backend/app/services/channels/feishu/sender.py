@@ -58,6 +58,63 @@ class FeishuBotSender:
             logger.exception("[FeishuSender] Token request failed: %s", exc)
             return None
 
+    async def send_markdown_message(
+        self, chat_id: str, markdown: str
+    ) -> Dict[str, Any]:
+        """Send a markdown-styled message to a Feishu chat.
+
+        Feishu does not provide a dedicated markdown message type in IM send API,
+        so we use the post message with `md` tag for rich text rendering.
+        """
+        if not chat_id:
+            return {"success": False, "error": "missing chat_id"}
+
+        token = await self._get_tenant_access_token()
+        if not token:
+            return {"success": False, "error": "failed to get tenant access token"}
+
+        url = f"{self.BASE_URL}/open-apis/im/v1/messages"
+        payload = {
+            "receive_id": chat_id,
+            "msg_type": "post",
+            "content": json.dumps(
+                {
+                    "post": {
+                        "zh_cn": {
+                            "title": "Wegent",
+                            "content": [[{"tag": "md", "text": markdown}]],
+                        }
+                    }
+                },
+                ensure_ascii=False,
+            ),
+        }
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(
+                    f"{url}?receive_id_type=chat_id", json=payload, headers=headers
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+            if data.get("code") == 0:
+                return {"success": True, "result": data}
+
+            logger.error("[FeishuSender] Send markdown message failed: %s", data)
+            return {
+                "success": False,
+                "error": data.get("msg", "send markdown message failed"),
+                "result": data,
+            }
+        except Exception as exc:
+            logger.exception("[FeishuSender] Send markdown message error: %s", exc)
+            return {"success": False, "error": str(exc)}
+
     async def send_text_message(self, chat_id: str, text: str) -> Dict[str, Any]:
         if not chat_id:
             return {"success": False, "error": "missing chat_id"}
