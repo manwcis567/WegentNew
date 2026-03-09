@@ -241,3 +241,54 @@ def test_sync_handler_uses_asyncio_run_without_running_loop(monkeypatch):
     captured["handler"](SimpleNamespace())
 
     assert processed["value"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_client_retries_when_connection_exits(monkeypatch):
+    channel = SimpleNamespace(
+        id=6,
+        name="feishu",
+        channel_type="feishu",
+        is_enabled=True,
+        config={"app_id": "id", "app_secret": "secret"},
+        default_team_id=1,
+        default_model_name="",
+    )
+    provider = FeishuChannelProvider(channel)
+    provider._set_running(True)
+
+    call_count = {"value": 0}
+
+    def _mock_start_blocking():
+        call_count["value"] += 1
+        if call_count["value"] >= 2:
+            provider._set_running(False)
+
+    async def _mock_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(provider, "_start_client_blocking", _mock_start_blocking)
+    monkeypatch.setattr(asyncio, "sleep", _mock_sleep)
+
+    await provider._run_client()
+
+    assert call_count["value"] == 2
+
+
+@pytest.mark.asyncio
+async def test_stop_marks_provider_not_running_without_task():
+    channel = SimpleNamespace(
+        id=7,
+        name="feishu",
+        channel_type="feishu",
+        is_enabled=True,
+        config={"app_id": "id", "app_secret": "secret"},
+        default_team_id=1,
+        default_model_name="",
+    )
+    provider = FeishuChannelProvider(channel)
+    provider._set_running(True)
+
+    await provider.stop()
+
+    assert provider.is_running is False
