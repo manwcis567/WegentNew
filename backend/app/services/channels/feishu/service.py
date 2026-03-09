@@ -26,6 +26,9 @@ MESSAGER_KIND = "Messager"
 MESSAGER_USER_ID = 0
 FEISHU_MSG_DEDUP_PREFIX = "feishu:msg_dedup:"
 FEISHU_MSG_DEDUP_TTL = 300
+FEISHU_MAX_RETRIES = 10
+FEISHU_RETRY_BASE_DELAY = 1.0
+FEISHU_RETRY_MAX_DELAY = 60.0
 
 
 def _get_channel_default_team_id(channel_id: int) -> Optional[int]:
@@ -122,25 +125,78 @@ class FeishuChannelProvider(BaseChannelProvider):
 
     async def _run_client(self) -> None:
         """Run Feishu websocket client in worker thread."""
-        try:
-            await asyncio.to_thread(self._start_client_blocking)
-        except asyncio.CancelledError:
-            logger.info(
-                "[Feishu] Channel %s (id=%d) worker cancelled",
-                self.channel_name,
-                self.channel_id,
-            )
-            raise
-        except Exception as exc:
-            if self.is_running:
-                self._set_error(f"Long connection exited unexpectedly: {exc}")
-                logger.exception(
-                    "[Feishu] Channel %s (id=%d) long connection failed: %s",
+        retry_count = 0
+
+        while self.is_running:
+            try:
+                await asyncio.to_thread(self._start_client_blocking)
+
+                if not self.is_running:
+                    break
+
+                retry_count += 1
+                if retry_count > FEISHU_MAX_RETRIES:
+                    self._set_error(
+                        f"Long connection exited unexpectedly and exceeded max retries ({FEISHU_MAX_RETRIES})"
+                    )
+                    self._set_running(False)
+                    break
+
+                delay = min(
+                    FEISHU_RETRY_BASE_DELAY * (2 ** (retry_count - 1)),
+                    FEISHU_RETRY_MAX_DELAY,
+                )
+                logger.warning(
+                    "[Feishu] Channel %s (id=%d) long connection exited unexpectedly "
+                    "(attempt %d/%d), reconnecting in %.1fs",
                     self.channel_name,
                     self.channel_id,
+                    retry_count,
+                    FEISHU_MAX_RETRIES,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+
+            except asyncio.CancelledError:
+                logger.info(
+                    "[Feishu] Channel %s (id=%d) worker cancelled",
+                    self.channel_name,
+                    self.channel_id,
+                )
+                raise
+            except Exception as exc:
+                if not self.is_running:
+                    break
+
+                retry_count += 1
+                if retry_count > FEISHU_MAX_RETRIES:
+                    self._set_error(
+                        f"Long connection failed and exceeded max retries ({FEISHU_MAX_RETRIES}): {exc}"
+                    )
+                    self._set_running(False)
+                    logger.exception(
+                        "[Feishu] Channel %s (id=%d) long connection failed: %s",
+                        self.channel_name,
+                        self.channel_id,
+                        exc,
+                    )
+                    break
+
+                delay = min(
+                    FEISHU_RETRY_BASE_DELAY * (2 ** (retry_count - 1)),
+                    FEISHU_RETRY_MAX_DELAY,
+                )
+                logger.warning(
+                    "[Feishu] Channel %s (id=%d) long connection error "
+                    "(attempt %d/%d), reconnecting in %.1fs: %s",
+                    self.channel_name,
+                    self.channel_id,
+                    retry_count,
+                    FEISHU_MAX_RETRIES,
+                    delay,
                     exc,
                 )
-                self._set_running(False)
+                await asyncio.sleep(delay)
 
     def _start_client_blocking(self) -> None:
         """Start Feishu websocket client in a dedicated worker thread."""
@@ -327,6 +383,8 @@ class FeishuChannelProvider(BaseChannelProvider):
             return False
 
     async def stop(self) -> None:
+        self._set_running(False)
+
         if self._task and not self._task.done():
             self._task.cancel()
             try:
@@ -339,4 +397,3 @@ class FeishuChannelProvider(BaseChannelProvider):
         self._event_loop = None
         self._handler = None
         self.sender = None
-        self._set_running(False)
