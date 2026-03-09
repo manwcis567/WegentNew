@@ -241,3 +241,86 @@ def test_sync_handler_uses_asyncio_run_without_running_loop(monkeypatch):
     captured["handler"](SimpleNamespace())
 
     assert processed["value"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_client_retries_when_connection_exits(monkeypatch):
+    channel = SimpleNamespace(
+        id=6,
+        name="feishu",
+        channel_type="feishu",
+        is_enabled=True,
+        config={"app_id": "id", "app_secret": "secret"},
+        default_team_id=1,
+        default_model_name="",
+    )
+    provider = FeishuChannelProvider(channel)
+    provider._set_running(True)
+
+    call_count = {"value": 0}
+
+    def _mock_start_blocking():
+        call_count["value"] += 1
+        if call_count["value"] >= 2:
+            provider._set_running(False)
+
+    async def _mock_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(provider, "_start_client_blocking", _mock_start_blocking)
+    monkeypatch.setattr(asyncio, "sleep", _mock_sleep)
+
+    await provider._run_client()
+
+    assert call_count["value"] == 2
+
+
+@pytest.mark.asyncio
+async def test_stop_marks_provider_not_running_without_task():
+    channel = SimpleNamespace(
+        id=7,
+        name="feishu",
+        channel_type="feishu",
+        is_enabled=True,
+        config={"app_id": "id", "app_secret": "secret"},
+        default_team_id=1,
+        default_model_name="",
+    )
+    provider = FeishuChannelProvider(channel)
+    provider._set_running(True)
+
+    await provider.stop()
+
+    assert provider.is_running is False
+
+
+def test_start_client_blocking_rebinds_sdk_module_loop(monkeypatch):
+    channel = SimpleNamespace(
+        id=8,
+        name="feishu",
+        channel_type="feishu",
+        is_enabled=True,
+        config={"app_id": "id", "app_secret": "secret"},
+        default_team_id=1,
+        default_model_name="",
+    )
+    provider = FeishuChannelProvider(channel)
+    provider._create_event_handler = lambda: object()
+
+    ws_client_module = ModuleType("lark_oapi.ws.client")
+    ws_client_module.loop = object()
+
+    class _FakeWsClient:
+        def __init__(self, app_id, app_secret, event_handler):
+            self.app_id = app_id
+            self.app_secret = app_secret
+            self.event_handler = event_handler
+
+        def start(self):
+            assert ws_client_module.loop is asyncio.get_event_loop()
+
+    ws_client_module.Client = _FakeWsClient
+
+    monkeypatch.setitem(sys.modules, "lark_oapi.ws.client", ws_client_module)
+
+    provider._start_client_blocking()
