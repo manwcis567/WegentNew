@@ -67,7 +67,7 @@ class StreamingResponseEmitter:
         **kwargs,
     ) -> None:
         text = self._buffer.strip() or "任务已完成"
-        await self._sender.send_text_message(self._chat_id, text)
+        await self._sender.send_markdown_message(self._chat_id, text)
 
     async def emit_error(
         self,
@@ -76,10 +76,12 @@ class StreamingResponseEmitter:
         error: str,
         **kwargs,
     ) -> None:
-        await self._sender.send_text_message(self._chat_id, f"执行失败: {error}")
+        await self._sender.send_markdown_message(
+            self._chat_id, f"**执行失败**\n\n{error}"
+        )
 
     async def emit_cancelled(self, task_id: int, subtask_id: int, **kwargs) -> None:
-        await self._sender.send_text_message(self._chat_id, "任务已取消")
+        await self._sender.send_markdown_message(self._chat_id, "**任务已取消**")
 
     async def close(self) -> None:
         return None
