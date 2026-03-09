@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+import asyncio
 import sys
 from types import ModuleType, SimpleNamespace
 
@@ -141,3 +142,102 @@ async def test_handle_long_connection_event_dedup(monkeypatch):
     await provider._handle_long_connection_event(event)
 
     assert called["value"] is False
+
+
+@pytest.mark.asyncio
+async def test_sync_handler_uses_current_running_loop(monkeypatch):
+    channel = SimpleNamespace(
+        id=4,
+        name="feishu",
+        channel_type="feishu",
+        is_enabled=True,
+        config={"app_id": "id", "app_secret": "secret"},
+        default_team_id=1,
+        default_model_name="",
+    )
+    provider = FeishuChannelProvider(channel)
+
+    captured = {}
+
+    class _FakeBuilder:
+        def register_p2_im_message_receive_v1(self, handler):
+            captured["handler"] = handler
+            return self
+
+        def build(self):
+            return object()
+
+    class _FakeEventDispatcherHandler:
+        @staticmethod
+        def builder(_encrypt_key, _verification_token):
+            return _FakeBuilder()
+
+    event_dispatcher_module = ModuleType("lark_oapi.event.dispatcher_handler")
+    event_dispatcher_module.EventDispatcherHandler = _FakeEventDispatcherHandler
+    monkeypatch.setitem(
+        sys.modules,
+        "lark_oapi.event.dispatcher_handler",
+        event_dispatcher_module,
+    )
+
+    processed = {"value": False}
+
+    async def _mock_handle(_event):
+        processed["value"] = True
+
+    provider._handle_long_connection_event = _mock_handle
+    provider._event_loop = asyncio.get_running_loop()
+
+    provider._create_event_handler()
+    captured["handler"](SimpleNamespace())
+    await asyncio.sleep(0)
+
+    assert processed["value"] is True
+
+
+def test_sync_handler_uses_asyncio_run_without_running_loop(monkeypatch):
+    channel = SimpleNamespace(
+        id=5,
+        name="feishu",
+        channel_type="feishu",
+        is_enabled=True,
+        config={"app_id": "id", "app_secret": "secret"},
+        default_team_id=1,
+        default_model_name="",
+    )
+    provider = FeishuChannelProvider(channel)
+
+    captured = {}
+
+    class _FakeBuilder:
+        def register_p2_im_message_receive_v1(self, handler):
+            captured["handler"] = handler
+            return self
+
+        def build(self):
+            return object()
+
+    class _FakeEventDispatcherHandler:
+        @staticmethod
+        def builder(_encrypt_key, _verification_token):
+            return _FakeBuilder()
+
+    event_dispatcher_module = ModuleType("lark_oapi.event.dispatcher_handler")
+    event_dispatcher_module.EventDispatcherHandler = _FakeEventDispatcherHandler
+    monkeypatch.setitem(
+        sys.modules,
+        "lark_oapi.event.dispatcher_handler",
+        event_dispatcher_module,
+    )
+
+    processed = {"value": False}
+
+    async def _mock_handle(_event):
+        processed["value"] = True
+
+    provider._handle_long_connection_event = _mock_handle
+
+    provider._create_event_handler()
+    captured["handler"](SimpleNamespace())
+
+    assert processed["value"] is True

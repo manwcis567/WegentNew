@@ -208,24 +208,39 @@ class FeishuChannelProvider(BaseChannelProvider):
 
         builder = EventDispatcherHandler.builder("", "")
 
-        def _sync_handler(event: Any) -> None:
-            loop = self._event_loop
-            if loop and not loop.is_closed():
-                future = asyncio.run_coroutine_threadsafe(
-                    self._handle_long_connection_event(event),
-                    loop,
+        def _attach_error_logger(async_result: Any) -> None:
+            try:
+                async_result.result()
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.exception(
+                    "[Feishu] Failed to process long-connection event: %s",
+                    exc,
                 )
 
-                def _log_async_error(done_future: Any) -> None:
-                    try:
-                        done_future.result()
-                    except Exception as exc:  # pragma: no cover - defensive logging
-                        logger.exception(
-                            "[Feishu] Failed to process long-connection event: %s",
-                            exc,
-                        )
+        def _sync_handler(event: Any) -> None:
+            coroutine = self._handle_long_connection_event(event)
+            loop = self._event_loop
+            try:
+                current_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                current_loop = None
 
-                future.add_done_callback(_log_async_error)
+            if loop and not loop.is_closed() and current_loop is loop:
+                task = current_loop.create_task(coroutine)
+                task.add_done_callback(_attach_error_logger)
+                return
+
+            if loop and not loop.is_closed():
+                future = asyncio.run_coroutine_threadsafe(
+                    coroutine,
+                    loop,
+                )
+                future.add_done_callback(_attach_error_logger)
+                return
+
+            if current_loop and not current_loop.is_closed():
+                task = current_loop.create_task(coroutine)
+                task.add_done_callback(_attach_error_logger)
                 return
 
             logger.warning(
@@ -233,7 +248,7 @@ class FeishuChannelProvider(BaseChannelProvider):
                 self.channel_id,
             )
             try:
-                asyncio.run(self._handle_long_connection_event(event))
+                asyncio.run(coroutine)
             except Exception as exc:
                 logger.exception(
                     "[Feishu] Failed to process event in synchronous fallback: %s",
