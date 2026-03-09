@@ -5,7 +5,9 @@
 """Feishu long-connection channel provider."""
 
 import asyncio
+import importlib.util
 import logging
+import sys
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from app.core.cache import cache_manager
@@ -120,11 +122,8 @@ class FeishuChannelProvider(BaseChannelProvider):
 
     async def _run_client(self) -> None:
         """Run Feishu websocket client in worker thread."""
-        if not self._client:
-            return
-
         try:
-            await asyncio.to_thread(self._client.start)
+            await asyncio.to_thread(self._start_client_blocking)
         except asyncio.CancelledError:
             logger.info(
                 "[Feishu] Channel %s (id=%d) worker cancelled",
@@ -142,6 +141,24 @@ class FeishuChannelProvider(BaseChannelProvider):
                     exc,
                 )
                 self._set_running(False)
+
+    def _start_client_blocking(self) -> None:
+        """Start Feishu websocket client in a dedicated worker thread."""
+        worker_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(worker_loop)
+        try:
+            from lark_oapi.ws.client import Client as FeishuWsClient
+
+            self._client = FeishuWsClient(
+                app_id=self.app_id,
+                app_secret=self.app_secret,
+                event_handler=self._create_event_handler(),
+            )
+            self._client.start()
+        finally:
+            self._client = None
+            asyncio.set_event_loop(None)
+            worker_loop.close()
 
     async def _handle_long_connection_event(
         self, event: "P2ImMessageReceiveV1"
@@ -262,10 +279,16 @@ class FeishuChannelProvider(BaseChannelProvider):
             self._set_error("Feishu not configured: missing app_id or app_secret")
             return False
 
+        try:
+            sdk_available = importlib.util.find_spec("lark_oapi.ws.client") is not None
+        except (ImportError, ValueError):
+            sdk_available = "lark_oapi.ws.client" in sys.modules
+        if not sdk_available:
+            self._set_error("Feishu SDK dependency missing. Please install lark-oapi.")
+            return False
+
         channel_id = self.channel_id
         try:
-            from lark_oapi.ws.client import Client as FeishuWsClient
-
             self.sender = FeishuBotSender(self.app_id, self.app_secret)
             self._handler = FeishuChannelHandler(
                 channel_id=channel_id,
@@ -279,11 +302,6 @@ class FeishuChannelProvider(BaseChannelProvider):
                 ),
             )
             self._event_loop = asyncio.get_running_loop()
-            self._client = FeishuWsClient(
-                app_id=self.app_id,
-                app_secret=self.app_secret,
-                event_handler=self._create_event_handler(),
-            )
             self._task = asyncio.create_task(self._run_client())
 
             self._set_running(True)
