@@ -203,7 +203,13 @@ class FeishuChannelProvider(BaseChannelProvider):
         worker_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(worker_loop)
         try:
+            import lark_oapi.ws.client as feishu_ws_client_module
             from lark_oapi.ws.client import Client as FeishuWsClient
+
+            # lark_oapi.ws.client stores a module-level event loop at import time.
+            # Rebind it here to the current worker loop so run_until_complete()
+            # inside SDK start() does not target an already running main-loop.
+            feishu_ws_client_module.loop = worker_loop
 
             self._client = FeishuWsClient(
                 app_id=self.app_id,

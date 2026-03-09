@@ -292,3 +292,35 @@ async def test_stop_marks_provider_not_running_without_task():
     await provider.stop()
 
     assert provider.is_running is False
+
+
+def test_start_client_blocking_rebinds_sdk_module_loop(monkeypatch):
+    channel = SimpleNamespace(
+        id=8,
+        name="feishu",
+        channel_type="feishu",
+        is_enabled=True,
+        config={"app_id": "id", "app_secret": "secret"},
+        default_team_id=1,
+        default_model_name="",
+    )
+    provider = FeishuChannelProvider(channel)
+    provider._create_event_handler = lambda: object()
+
+    ws_client_module = ModuleType("lark_oapi.ws.client")
+    ws_client_module.loop = object()
+
+    class _FakeWsClient:
+        def __init__(self, app_id, app_secret, event_handler):
+            self.app_id = app_id
+            self.app_secret = app_secret
+            self.event_handler = event_handler
+
+        def start(self):
+            assert ws_client_module.loop is asyncio.get_event_loop()
+
+    ws_client_module.Client = _FakeWsClient
+
+    monkeypatch.setitem(sys.modules, "lark_oapi.ws.client", ws_client_module)
+
+    provider._start_client_blocking()
